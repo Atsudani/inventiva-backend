@@ -3,13 +3,13 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  UnauthorizedException,
 } from '@nestjs/common';
 import { randomBytes, createHash } from 'crypto';
 import { DatabaseService } from '../database/database.service';
 import { AdminCreateUserDto } from './dto/admin-create-user.dto';
 import { AdminCreateUserResponseDto } from './dto/admin-create-user.response';
 import * as bcrypt from 'bcrypt';
-import { UnauthorizedException } from '@nestjs/common';
 import { SetPasswordDto } from './dto/set-password.dto';
 import { JwtService } from '@nestjs/jwt';
 import { LoginDto } from './dto/login.dto';
@@ -19,6 +19,7 @@ import { ConfigService } from '@nestjs/config';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
+import { EmailService } from '../email/email.service';
 
 @Injectable()
 export class AuthService {
@@ -26,16 +27,43 @@ export class AuthService {
     private readonly db: DatabaseService,
     private readonly jwtService: JwtService,
     private readonly configService: ConfigService,
+    private readonly emailService: EmailService,
   ) {}
+
+  //Helpers
+  private isProd(): boolean {
+    return this.configService.get<string>('NODE_ENV') === 'production';
+  }
+
+  private buildUrl(path: string, token: string): string {
+    const base = (this.configService.get<string>('FRONTEND_URL') || '').replace(
+      /\/$/,
+      '',
+    );
+    return `${base}${path}?token=${encodeURIComponent(token)}`;
+  }
+
+  //Metodos
 
   async adminCreateUser(
     dto: AdminCreateUserDto,
   ): Promise<AdminCreateUserResponseDto> {
     const email = dto.email.trim().toLowerCase();
     const fullName = dto.fullName?.trim() ?? null;
+    const SETUP_EXPIRES_HOURS = 24;
 
-    const frontendUrl =
-      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
+    const existing = await this.db.query<{ CNT: number }>(
+      `
+      SELECT COUNT(1) CNT
+      FROM WN_APP_USERS
+      WHERE LOWER(EMAIL) = :email
+      `,
+      { email },
+    );
+
+    if ((existing[0]?.CNT ?? 0) > 0) {
+      throw new BadRequestException('El email ya está registrado');
+    }
 
     // 1) Insertar user (con commit)
     await this.db.query(
@@ -54,7 +82,10 @@ export class AuthService {
     );
 
     const userId = row[0]?.ID;
-    if (!userId) throw new Error('No se pudo obtener el ID del usuario creado');
+    if (!userId)
+      throw new BadRequestException(
+        'No se pudo obtener el ID del usuario creado',
+      );
 
     // 3) Generar token (se enviará por email más adelante)
     const token = randomBytes(32).toString('hex');
@@ -70,25 +101,40 @@ export class AuthService {
       { autoCommit: true },
     );
 
-    const setupUrl = `${frontendUrl.replace(/\/$/, '')}/set-password?token=${token}`;
+    //const setupUrl = `${frontendUrl.replace(/\/$/, '')}/set-password?token=${token}`;
 
-    // Por ahora devolvemos el token para pruebas sin email
+    const setupUrl = this.buildUrl('/setup-password', token);
+
+    if (this.isProd()) {
+      await this.emailService.sendSetupPasswordEmail(email, setupUrl);
+
+      return {
+        ok: true,
+        userId,
+        email,
+        expiresInHours: SETUP_EXPIRES_HOURS, // si lo tenés como const
+      };
+    }
+
+    //para dev
     return {
       ok: true,
       userId,
       email,
       token,
-      expiresInHours: 24,
+      expiresInHours: SETUP_EXPIRES_HOURS,
       setupUrl,
     };
   }
 
-  async setPassword(dto: SetPasswordDto) {
+  async setPassword(dto: SetPasswordDto): Promise<{ ok: true }> {
     const token = dto.token.trim();
     const newPassword = dto.newPassword;
 
-    if (newPassword.length < 8) {
-      throw new Error('La contraseña debe tener al menos 8 caracteres');
+    if (!newPassword || newPassword.length < 8) {
+      throw new BadRequestException(
+        'La contraseña debe tener al menos 8 caracteres',
+      );
     }
 
     const tokenHash = createHash('sha256').update(token).digest('hex');
@@ -107,7 +153,7 @@ export class AuthService {
 
     const userId = rows[0]?.USER_ID;
     if (!userId) {
-      throw new Error('Token inválido, vencido o ya utilizado');
+      throw new BadRequestException('Token inválido, vencido o ya utilizado');
     }
 
     // 2) hash password
@@ -188,6 +234,7 @@ export class AuthService {
 
   async resendSetup(dto: ResendSetupDto): Promise<ResendSetupResponseDto> {
     const email = dto.email.trim().toLowerCase();
+    const SETUP_EXPIRES_HOURS = 24;
 
     // 1) Buscar usuario
     const users = await this.db.query<{
@@ -219,12 +266,11 @@ export class AuthService {
     // 2) Invalidate tokens anteriores no usados (RECOMENDADO)
     await this.db.query(
       `
-    UPDATE WN_PWD_SETUP_TOKENS
-       SET USED_AT = SYSTIMESTAMP
-     WHERE USER_ID = :userId
-       AND USED_AT IS NULL
-       AND EXPIRES_AT > SYSTIMESTAMP
-    `,
+      UPDATE WN_PWD_SETUP_TOKENS
+      SET USED_AT = SYSTIMESTAMP
+      WHERE USER_ID = :userId
+      AND USED_AT IS NULL
+      `,
       { userId: user.ID },
       { autoCommit: true },
     );
@@ -242,17 +288,25 @@ export class AuthService {
       { autoCommit: true },
     );
 
-    const frontendUrl =
-      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
+    const setupUrl = this.buildUrl('/setup-password', token);
 
-    const setupUrl = `${frontendUrl.replace(/\/$/, '')}/set-password?token=${token}`;
+    if (this.isProd()) {
+      await this.emailService.sendSetupPasswordEmail(user.EMAIL, setupUrl);
+
+      return {
+        ok: true,
+        userId: user.ID,
+        email: user.EMAIL,
+        expiresInHours: SETUP_EXPIRES_HOURS,
+      };
+    }
 
     return {
       ok: true,
       userId: user.ID,
       email: user.EMAIL,
       token,
-      expiresInHours: 24,
+      expiresInHours: SETUP_EXPIRES_HOURS,
       setupUrl,
     };
   }
@@ -348,23 +402,18 @@ export class AuthService {
     // Rate limit por DB: max 3 requests por 15 minutos
     const counts = await this.db.query<{ CNT: number }>(
       `
-  SELECT COUNT(1) CNT
-  FROM WN_PWD_RESET_TOKENS
-  WHERE USER_ID = :userId
-    AND CREATED_AT > SYSTIMESTAMP - INTERVAL '${WINDOW_MINUTES}' MINUTE
-  `,
-      { userId: user.ID },
+      SELECT COUNT(1) CNT
+      FROM WN_PWD_RESET_TOKENS
+      WHERE USER_ID = :userId
+        AND CREATED_AT > SYSTIMESTAMP - NUMTODSINTERVAL(:windowMinutes, 'MINUTE')
+      `,
+      { userId: user.ID, windowMinutes: WINDOW_MINUTES },
     );
 
     const cnt = counts[0]?.CNT ?? 0;
 
     if (cnt >= MAX_REQUESTS) {
-      // En PROD no revelamos nada: ok true y listo (como si se envió)
-      const nodeEnv =
-        this.configService.get<string>('NODE_ENV') ?? 'development';
-      const isProd = nodeEnv === 'production';
-
-      if (isProd) return { ok: true };
+      if (this.isProd()) return { ok: true };
 
       // En DEV devolvemos info útil para vos
       return {
@@ -388,16 +437,11 @@ export class AuthService {
       { autoCommit: true },
     );
 
-    // DEV helper (para probar sin email)
-    const frontendUrl =
-      this.configService.get<string>('FRONTEND_URL') ?? 'http://localhost:3001';
-    const resetUrl = `${frontendUrl.replace(/\/$/, '')}/reset-password?token=${token}`;
+    // ... si el usuario existe y está activo:
+    const resetUrl = this.buildUrl('/reset-password', token);
 
-    const nodeEnv = this.configService.get<string>('NODE_ENV') ?? 'development';
-    const isProd = nodeEnv === 'production';
-
-    if (isProd) {
-      // En PROD: no devolver token/url
+    if (this.isProd()) {
+      await this.emailService.sendResetPasswordEmail(user.EMAIL, resetUrl);
       return { ok: true };
     }
 

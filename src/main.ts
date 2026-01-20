@@ -15,4 +15,9 @@ async function bootstrap() {
 
   await app.listen(process.env.PORT ?? 3000);
 }
-bootstrap();
+
+// bootstrap(); me tira warning jeje
+bootstrap().catch((err) => {
+  console.error('Nest bootstrap failed', err);
+  process.exit(1);
+});

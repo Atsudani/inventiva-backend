@@ -217,18 +217,30 @@ export class AuthService {
     if (!user.PASSWORD_HASH)
       throw new UnauthorizedException('Usuario sin contraseña');
 
+    // ✅ validar password primero
     const ok = await bcrypt.compare(dto.password, user.PASSWORD_HASH);
     if (!ok) throw new UnauthorizedException('Credenciales inválidas');
 
-    // payload JWT
+    // ✅ recién ahora crear sesión
+    const sid = randomBytes(24).toString('hex');
+
+    await this.db.query(
+      `
+    INSERT INTO WN_USER_SESSIONS (USER_ID, SID, EXPIRES_AT)
+    VALUES (:userId, :sid, SYSTIMESTAMP + INTERVAL '7' DAY)
+    `,
+      { userId: user.ID, sid },
+      { autoCommit: true },
+    );
+
     const payload = {
       sub: user.ID,
       email: user.EMAIL,
       role: user.ROLE,
+      sid,
     };
 
     const access_token = await this.jwtService.signAsync(payload);
-
     return { access_token };
   }
 
@@ -266,10 +278,11 @@ export class AuthService {
     // 2) Invalidate tokens anteriores no usados (RECOMENDADO)
     await this.db.query(
       `
-      UPDATE WN_PWD_SETUP_TOKENS
-      SET USED_AT = SYSTIMESTAMP
-      WHERE USER_ID = :userId
-      AND USED_AT IS NULL
+        UPDATE WN_PWD_SETUP_TOKENS
+        SET USED_AT = SYSTIMESTAMP
+        WHERE USER_ID = :userId
+          AND USED_AT IS NULL
+          AND EXPIRES_AT > SYSTIMESTAMP
       `,
       { userId: user.ID },
       { autoCommit: true },
@@ -500,6 +513,37 @@ export class AuthService {
      WHERE ID = :id
     `,
       { id: t.ID },
+      { autoCommit: true },
+    );
+
+    return { ok: true };
+  }
+
+  async logout(userId: number, sid: string): Promise<{ ok: true }> {
+    await this.db.query(
+      `
+    UPDATE WN_USER_SESSIONS
+       SET REVOKED_AT = SYSTIMESTAMP
+     WHERE USER_ID = :userId
+       AND SID = :sid
+       AND REVOKED_AT IS NULL
+    `,
+      { userId, sid },
+      { autoCommit: true },
+    );
+
+    return { ok: true };
+  }
+
+  async logoutAll(userId: number): Promise<{ ok: true }> {
+    await this.db.query(
+      `
+    UPDATE WN_USER_SESSIONS
+       SET REVOKED_AT = SYSTIMESTAMP
+     WHERE USER_ID = :userId
+       AND REVOKED_AT IS NULL
+    `,
+      { userId },
       { autoCommit: true },
     );
 

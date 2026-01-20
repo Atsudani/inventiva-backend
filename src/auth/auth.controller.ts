@@ -25,6 +25,7 @@ export class AuthController {
     return this.authService.adminCreateUser(dto);
   }
 
+  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('set-password')
   setPassword(@Body() dto: SetPasswordDto) {
     return this.authService.setPassword(dto);
@@ -61,10 +62,21 @@ export class AuthController {
     return this.authService.forgotPassword(dto);
   }
 
-  @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Throttle({ default: { limit: 5, ttl: 60_000 } })
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout')
+  logout(@Req() req: AuthRequest) {
+    return this.authService.logout(req.user.sub, req.user.sid);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Post('logout-all')
+  logoutAll(@Req() req: AuthRequest) {
+    return this.authService.logoutAll(req.user.sub);
   }
 }

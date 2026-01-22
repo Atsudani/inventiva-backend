@@ -77,13 +77,18 @@ export class SifenController {
   }
 
   @Patch('comprobantes/:codEmpresa/:tipo/:serie/:numero/reenviar')
-  async markForResend(
+  async marcarReenvio(
     @Param('codEmpresa') codEmpresa: string,
     @Param('tipo') tipo: string,
     @Param('serie') serie: string,
     @Param('numero', ParseIntPipe) numero: number,
   ) {
-    await this.sifenService.markForResend({ codEmpresa, tipo, serie, numero });
+    await this.sifenService.marcarParaReenvio({
+      codEmpresa,
+      tipo,
+      serie,
+      numero,
+    });
     return { ok: true };
   }
 }

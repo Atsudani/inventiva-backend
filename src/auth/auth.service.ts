@@ -5,6 +5,7 @@ import {
   BadRequestException,
   UnauthorizedException,
 } from '@nestjs/common';
+import type { Response } from 'express';
 import { randomBytes, createHash } from 'crypto';
 import { DatabaseService } from '../database/database.service';
 import { AdminCreateUserDto } from './dto/admin-create-user.dto';
@@ -186,9 +187,10 @@ export class AuthService {
     return { ok: true };
   }
 
-  async login(dto: LoginDto): Promise<{ access_token: string }> {
+  async login(dto: LoginDto, res: Response): Promise<{ ok: true }> {
     const email = dto.email.trim().toLowerCase();
 
+    // ... mismo código de validación de usuario ...
     const rows = await this.db.query<{
       ID: number;
       EMAIL: string;
@@ -221,7 +223,7 @@ export class AuthService {
     const ok = await bcrypt.compare(dto.password, user.PASSWORD_HASH);
     if (!ok) throw new UnauthorizedException('Credenciales inválidas');
 
-    // ✅ recién ahora crear sesión
+    // ✅ crear sesión
     const sid = randomBytes(24).toString('hex');
 
     await this.db.query(
@@ -240,8 +242,25 @@ export class AuthService {
       sid,
     };
 
+    // Generar el token JWT
     const access_token = await this.jwtService.signAsync(payload);
-    return { access_token };
+
+    // 👇 NUEVO: Setear cookie HttpOnly en la respuesta
+    // Parámetros:
+    // 1. Nombre de la cookie: 'access_token'
+    // 2. Valor: el token JWT
+    // 3. Opciones:
+    res.cookie('access_token', access_token, {
+      httpOnly: true, // ✅ No accesible desde JavaScript (seguridad)
+      secure: this.isProd(), // ✅ Solo HTTPS en producción
+      sameSite: 'lax', // ✅ Protección contra CSRF
+      maxAge: 7 * 24 * 60 * 60 * 1000, // ✅ 7 días en milisegundos
+      path: '/', // ✅ Disponible en todas las rutas
+    });
+
+    // 👇 CAMBIO 3: Devolver solo { ok: true }
+    // El token ya está en la cookie, no lo devolvemos en JSON
+    return { ok: true };
   }
 
   async resendSetup(dto: ResendSetupDto): Promise<ResendSetupResponseDto> {
@@ -519,7 +538,11 @@ export class AuthService {
     return { ok: true };
   }
 
-  async logout(userId: number, sid: string): Promise<{ ok: true }> {
+  async logout(
+    userId: number,
+    sid: string,
+    res: Response,
+  ): Promise<{ ok: true }> {
     await this.db.query(
       `
     UPDATE WN_USER_SESSIONS
@@ -532,10 +555,18 @@ export class AuthService {
       { autoCommit: true },
     );
 
+    // Limpiar cookie
+    res.clearCookie('access_token', {
+      httpOnly: true,
+      secure: this.isProd(),
+      sameSite: 'lax',
+      path: '/',
+    });
+
     return { ok: true };
   }
 
-  async logoutAll(userId: number): Promise<{ ok: true }> {
+  async logoutAll(userId: number, res: Response): Promise<{ ok: true }> {
     await this.db.query(
       `
     UPDATE WN_USER_SESSIONS
@@ -547,6 +578,47 @@ export class AuthService {
       { autoCommit: true },
     );
 
+    res.clearCookie('access_token', {
+      httpOnly: true,
+      secure: this.isProd(),
+      sameSite: 'lax',
+      path: '/',
+    });
+
     return { ok: true };
+  }
+
+  async getMe(userId: number) {
+    const users = await this.db.query<{
+      ID: number;
+      EMAIL: string;
+      FULL_NAME: string;
+      ROLE: string;
+    }>(
+      `
+    SELECT ID, EMAIL, FULL_NAME, ROLE
+    FROM WN_APP_USERS
+    WHERE ID = :userId
+    `,
+      { userId },
+    );
+
+    const user = users[0];
+    if (!user) {
+      throw new UnauthorizedException('Usuario no encontrado');
+    }
+
+    // TODO: Aquí más adelante traer permisos desde tu tabla de permisos
+    const permisos: string[] = [];
+
+    return {
+      usuario: {
+        id: user.ID,
+        email: user.EMAIL,
+        nombre: user.FULL_NAME || user.EMAIL,
+        role: user.ROLE,
+      },
+      permisos,
+    };
   }
 }

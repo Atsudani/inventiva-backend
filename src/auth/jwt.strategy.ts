@@ -1,7 +1,12 @@
+// ============================================
+// Leer token desde cookie.
+// El token es mejor del lado del servidor con httpOnly cookie, que almacenar en el storage del cliente.
+// ============================================
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { PassportStrategy } from '@nestjs/passport';
 import { ExtractJwt, Strategy } from 'passport-jwt';
+import type { Request } from 'express';
 import { DatabaseService } from 'src/database/database.service';
 
 export type JwtPayload = {
@@ -11,6 +16,12 @@ export type JwtPayload = {
   sid: string;
 };
 
+interface RequestWithCookies extends Request {
+  cookies: {
+    access_token?: string;
+  };
+}
+
 @Injectable()
 export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
   constructor(
@@ -18,10 +29,20 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
     private readonly db: DatabaseService,
   ) {
     super({
-      jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
+      jwtFromRequest: ExtractJwt.fromExtractors([
+        (request: Request) => {
+          const req = request as RequestWithCookies;
+
+          // console.log('🍪 All cookies:', req.cookies);
+          // console.log('🔑 Token extraido:', req.cookies?.access_token);
+
+          return req.cookies?.access_token || null;
+        },
+      ]),
       ignoreExpiration: false,
       secretOrKey:
         configService.get<string>('JWT_SECRET') || 'dev_secret_change_me',
+      passReqToCallback: false,
     });
   }
 
@@ -42,7 +63,6 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       throw new UnauthorizedException('Sesión inválida o expirada');
     }
 
-    // opcional: marcar actividad
     await this.db.query(
       `
         UPDATE WN_USER_SESSIONS
@@ -53,7 +73,7 @@ export class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
       { sid: payload.sid, userId: payload.sub },
       { autoCommit: true },
     );
-    // esto va a quedar disponible como req.user
+
     return payload;
   }
 }

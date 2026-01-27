@@ -2,9 +2,13 @@ import 'colors';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { ValidationPipe } from '@nestjs/common';
+import cookieParser from 'cookie-parser'; // 👈 DEBE ESTAR ESTE IMPORT
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
+
+  // 👇 ESTO DEBE ESTAR **ANTES** DE enableCors()
+  app.use(cookieParser());
 
   app.enableCors({
     origin: ['http://localhost:3000'],

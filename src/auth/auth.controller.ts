@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Post, Req, UseGuards } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Req,
+  UseGuards,
+  Res,
+} from '@nestjs/common';
+import type { Response } from 'express';
 import { AuthService } from './auth.service';
 import { SetPasswordDto } from './dto/set-password.dto';
 import { AdminCreateUserDto } from './dto/admin-create-user.dto';
@@ -18,6 +27,7 @@ type AuthRequest = Request & { user: JwtPayload };
 @Controller('auth')
 export class AuthController {
   constructor(private readonly authService: AuthService) {}
+
   @UseGuards(JwtAuthGuard, RolesGuard)
   @Roles('ADMIN')
   @Post('admin/create-user')
@@ -40,14 +50,19 @@ export class AuthController {
 
   @Throttle({ default: { limit: 10, ttl: 60_000 } })
   @Post('login')
-  login(@Body() dto: LoginDto) {
-    return this.authService.login(dto);
+  async login(@Body() dto: LoginDto, @Res() res: Response) {
+    // 👇 CAMBIO: Pasar 'res' al service
+    const result = await this.authService.login(dto, res);
+
+    // 👇 CAMBIO: Devolver con res.json() en vez de return directo
+    // Esto es necesario porque estamos usando @Res() decorator
+    return res.json(result);
   }
 
   @UseGuards(JwtAuthGuard)
   @Get('me')
-  me(@Req() req: AuthRequest) {
-    return { ok: true, user: req.user };
+  async me(@Req() req: AuthRequest) {
+    return this.authService.getMe(req.user.sub);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -70,13 +85,22 @@ export class AuthController {
 
   @UseGuards(JwtAuthGuard)
   @Post('logout')
-  logout(@Req() req: AuthRequest) {
-    return this.authService.logout(req.user.sub, req.user.sid);
+  async logout(@Req() req: AuthRequest, @Res() res: Response) {
+    // 👇 CAMBIO: Pasar 'res' al service
+    const result = await this.authService.logout(
+      req.user.sub,
+      req.user.sid,
+      res,
+    );
+
+    // 👇 CAMBIO: Devolver con res.json() (igual que en login)
+    return res.json(result);
   }
 
-  @UseGuards(JwtAuthGuard)
+  @UseGuards(JwtAuthGuard) // 👈 NO OLVIDAR ESTO
   @Post('logout-all')
-  logoutAll(@Req() req: AuthRequest) {
-    return this.authService.logoutAll(req.user.sub);
+  async logoutAll(@Req() req: AuthRequest, @Res() res: Response) {
+    const result = await this.authService.logoutAll(req.user.sub, res);
+    return res.json(result);
   }
 }

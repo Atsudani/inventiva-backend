@@ -621,4 +621,19 @@ export class AuthService {
       permisos,
     };
   }
+
+  /**
+   * Limpia la cookie de autenticación sin validar el token.
+   * Usado cuando el token ya es inválido pero la cookie persiste.
+   */
+  clearCookie(res: Response): void {
+    res.clearCookie('access_token', {
+      httpOnly: true,
+      secure: this.isProd(),
+      sameSite: 'lax',
+      path: '/',
+    });
+
+    res.json({ ok: true });
+  }
 }

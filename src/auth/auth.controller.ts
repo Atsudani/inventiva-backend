@@ -103,4 +103,14 @@ export class AuthController {
     const result = await this.authService.logoutAll(req.user.sub, res);
     return res.json(result);
   }
+
+  /**
+   * Endpoint para limpiar la cookie sin requerir autenticación válida.
+   * Útil cuando el token es inválido pero la cookie aún existe.
+   * El frontend usa esto cuando recibe 401 para limpiar la cookie HttpOnly.
+   */
+  @Post('clear-cookie')
+  clearCookie(@Res() res: Response) {
+    return this.authService.clearCookie(res);
+  }
 }

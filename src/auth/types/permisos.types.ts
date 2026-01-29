@@ -66,5 +66,3 @@ export interface ModuloIntermedio {
   orden: number;
   tipos: Map<number, TipoIntermedio>;
 }
-
-mn;

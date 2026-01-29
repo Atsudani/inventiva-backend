@@ -22,6 +22,41 @@ import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EmailService } from '../email/email.service';
 
+// ✅ INTERFACES FUERA DE LA CLASE (al inicio del archivo)
+// ------------------------------------------------
+
+interface PaginaIntermedia {
+  id: number;
+  codigo: string;
+  nombre: string;
+  ruta: string;
+  icono: string | null;
+  orden: number;
+  permisos: {
+    ver: boolean;
+    crear: boolean;
+    editar: boolean;
+    eliminar: boolean;
+  };
+}
+
+interface TipoIntermedio {
+  id: number;
+  codigo: string;
+  nombre: string;
+  orden: number;
+  paginas: PaginaIntermedia[];
+}
+
+interface ModuloIntermedio {
+  id: number;
+  codigo: string;
+  nombre: string;
+  icono: string;
+  orden: number;
+  tipos: Map<number, TipoIntermedio>;
+}
+
 @Injectable()
 export class AuthService {
   constructor(
@@ -589,14 +624,16 @@ export class AuthService {
   }
 
   async getMe(userId: number) {
+    //1. Obtener datos del usuario
     const users = await this.db.query<{
       ID: number;
       EMAIL: string;
       FULL_NAME: string;
       ROLE: string;
+      GRUPO_ID: number;
     }>(
       `
-    SELECT ID, EMAIL, FULL_NAME, ROLE
+    SELECT ID, EMAIL, FULL_NAME, ROLE, GRUPO_ID
     FROM WN_APP_USERS
     WHERE ID = :userId
     `,
@@ -608,8 +645,20 @@ export class AuthService {
       throw new UnauthorizedException('Usuario no encontrado');
     }
 
-    // TODO: Aquí más adelante traer permisos desde tu tabla de permisos
-    const permisos: string[] = [];
+    // 2. Obtener permisos jerárquicos del usuario
+    const permisos = await this.getUserPermissions(userId);
+    console.log(permisos);
+
+    // 3. Obtener grupo del usuario
+    let grupoNombre: string | null = null;
+
+    if (user.GRUPO_ID) {
+      const grupos = await this.db.query<{ NOMBRE: string }>(
+        `SELECT NOMBRE FROM WN_GRUPOS WHERE ID = :grupoId`,
+        { grupoId: user.GRUPO_ID },
+      );
+      grupoNombre = grupos[0]?.NOMBRE || null;
+    }
 
     return {
       usuario: {
@@ -617,9 +666,95 @@ export class AuthService {
         email: user.EMAIL,
         nombre: user.FULL_NAME || user.EMAIL,
         role: user.ROLE,
+        grupo: grupoNombre,
       },
       permisos,
     };
+
+    // ============================================
+    // ESTRUCTURA DE RESPUESTA
+    // ============================================
+
+    /*
+      {
+        "usuario": {
+          "id": 1,
+          "email": "atsudani@invcop.com",
+          "nombre": "Atsushi Kusunose",
+          "role": "ADMIN",
+          "grupo": "Administradores"
+        },
+        "permisos": [
+          {
+            "id": 2,
+            "codigo": "VENTAS",
+            "nombre": "Ventas",
+            "icono": "ShoppingBag",
+            "orden": 2,
+            "tipos": [
+              {
+                "id": 1,
+                "codigo": "DEFINICIONES",
+                "nombre": "Definiciones",
+                "orden": 1,
+                "paginas": [
+                  {
+                    "id": 1,
+                    "codigo": "VENTAS_DEF_HABILITACION_CAJA",
+                    "nombre": "Habilitación de Caja",
+                    "ruta": "/ventas/definiciones/habilitacion-caja",
+                    "icono": null,
+                    "orden": 1,
+                    "permisos": {
+                      "ver": true,
+                      "crear": true,
+                      "editar": true,
+                      "eliminar": true
+                    }
+                  }
+                ]
+              },
+              {
+                "id": 2,
+                "codigo": "MOVIMIENTOS",
+                "nombre": "Movimientos",
+                "orden": 2,
+                "paginas": [
+                  {
+                    "id": 2,
+                    "codigo": "VENTAS_MOV_FACTURACION",
+                    "nombre": "Facturación",
+                    "ruta": "/ventas/movimientos/facturacion",
+                    "icono": null,
+                    "orden": 1,
+                    "permisos": {
+                      "ver": true,
+                      "crear": true,
+                      "editar": true,
+                      "eliminar": false
+                    }
+                  },
+                  {
+                    "id": 3,
+                    "codigo": "VENTAS_MOV_REMISIONES",
+                    "nombre": "Remisiones",
+                    "ruta": "/ventas/movimientos/remisiones",
+                    "icono": null,
+                    "orden": 2,
+                    "permisos": {
+                      "ver": true,
+                      "crear": true,
+                      "editar": true,
+                      "eliminar": false
+                    }
+                  }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    */
   }
 
   /**
@@ -635,5 +770,196 @@ export class AuthService {
     });
 
     res.json({ ok: true });
+  }
+
+  /**
+   * Obtener permisos del usuario
+   * Retorna la estructura jerárquica completa: módulos -> tipos -> páginas
+   */
+
+  async getUserPermissions(userId: number) {
+    const query = `
+    SELECT 
+      m.ID as MODULO_ID,
+      m.CODIGO as MODULO_CODIGO,
+      m.NOMBRE as MODULO_NOMBRE,
+      m.ICONO as MODULO_ICONO,
+      m.ORDEN as MODULO_ORDEN,
+      
+      t.ID as TIPO_ID,
+      t.CODIGO as TIPO_CODIGO,
+      t.NOMBRE as TIPO_NOMBRE,
+      t.ORDEN as TIPO_ORDEN,
+      
+      p.ID as PAGINA_ID,
+      p.CODIGO as PAGINA_CODIGO,
+      p.NOMBRE as PAGINA_NOMBRE,
+      p.RUTA as PAGINA_RUTA,
+      p.ICONO as PAGINA_ICONO,
+      p.ORDEN as PAGINA_ORDEN,
+      
+      gp.PUEDE_VER,
+      gp.PUEDE_CREAR,
+      gp.PUEDE_EDITAR,
+      gp.PUEDE_ELIMINAR
+      
+    FROM WN_APP_USERS u
+    INNER JOIN WN_GRUPOS g ON u.GRUPO_ID = g.ID
+    INNER JOIN WN_GRUPO_PAGINAS gp ON g.ID = gp.GRUPO_ID
+    INNER JOIN WN_PAGINAS p ON gp.PAGINA_ID = p.ID
+    INNER JOIN WN_MODULOS m ON p.MODULO_ID = m.ID
+    INNER JOIN WN_TIPO_PAGINAS t ON p.TIPO_ID = t.ID
+    
+    WHERE u.ID = :userId
+      AND g.ACTIVO = 'S'
+      AND m.ACTIVO = 'S'
+      AND t.ACTIVO = 'S'
+      AND p.ACTIVO = 'S'
+      AND gp.PUEDE_VER = 'S'
+      
+    ORDER BY m.ORDEN, t.ORDEN, p.ORDEN
+  `;
+
+    const results = await this.db.query<{
+      MODULO_ID: number;
+      MODULO_CODIGO: string;
+      MODULO_NOMBRE: string;
+      MODULO_ICONO: string;
+      MODULO_ORDEN: number;
+      TIPO_ID: number;
+      TIPO_CODIGO: string;
+      TIPO_NOMBRE: string;
+      TIPO_ORDEN: number;
+      PAGINA_ID: number;
+      PAGINA_CODIGO: string;
+      PAGINA_NOMBRE: string;
+      PAGINA_RUTA: string;
+      PAGINA_ICONO: string;
+      PAGINA_ORDEN: number;
+      PUEDE_VER: string;
+      PUEDE_CREAR: string;
+      PUEDE_EDITAR: string;
+      PUEDE_ELIMINAR: string;
+    }>(query, { userId });
+
+    // Transformar flat data a estructura jerárquica
+    const modulosMap = new Map<number, ModuloIntermedio>();
+
+    for (const row of results) {
+      // Crear módulo si no existe
+      if (!modulosMap.has(row.MODULO_ID)) {
+        modulosMap.set(row.MODULO_ID, {
+          id: row.MODULO_ID,
+          codigo: row.MODULO_CODIGO,
+          nombre: row.MODULO_NOMBRE,
+          icono: row.MODULO_ICONO,
+          orden: row.MODULO_ORDEN,
+          tipos: new Map<number, TipoIntermedio>(),
+        });
+      }
+
+      const modulo = modulosMap.get(row.MODULO_ID)!;
+
+      // Crear tipo si no existe
+      if (!modulo.tipos.has(row.TIPO_ID)) {
+        modulo.tipos.set(row.TIPO_ID, {
+          id: row.TIPO_ID,
+          codigo: row.TIPO_CODIGO,
+          nombre: row.TIPO_NOMBRE,
+          orden: row.TIPO_ORDEN,
+          paginas: [],
+        });
+      }
+
+      const tipo = modulo.tipos.get(row.TIPO_ID)!;
+
+      // Agregar página
+      tipo.paginas.push({
+        id: row.PAGINA_ID,
+        codigo: row.PAGINA_CODIGO,
+        nombre: row.PAGINA_NOMBRE,
+        ruta: row.PAGINA_RUTA,
+        icono: row.PAGINA_ICONO,
+        orden: row.PAGINA_ORDEN,
+        permisos: {
+          ver: row.PUEDE_VER === 'S',
+          crear: row.PUEDE_CREAR === 'S',
+          editar: row.PUEDE_EDITAR === 'S',
+          eliminar: row.PUEDE_ELIMINAR === 'S',
+        },
+      });
+    }
+
+    // Convertir Maps a arrays
+    const modulos = Array.from(modulosMap.values()).map((modulo) => ({
+      ...modulo,
+      tipos: Array.from(modulo.tipos.values()),
+    }));
+
+    return modulos;
+  }
+
+  /**
+   * Verificar si el usuario tiene permiso para una página específica
+   */
+  async userHasPagePermission(
+    userId: number,
+    pageCode: string,
+    permission: 'ver' | 'crear' | 'editar' | 'eliminar' = 'ver',
+  ): Promise<boolean> {
+    const permissionColumn = {
+      ver: 'PUEDE_VER',
+      crear: 'PUEDE_CREAR',
+      editar: 'PUEDE_EDITAR',
+      eliminar: 'PUEDE_ELIMINAR',
+    }[permission];
+
+    const query = `
+    SELECT COUNT(*) as HAS_PERMISSION
+    FROM WN_APP_USERS u
+    INNER JOIN WN_GRUPOS g ON u.GRUPO_ID = g.ID
+    INNER JOIN WN_GRUPO_PAGINAS gp ON g.ID = gp.GRUPO_ID
+    INNER JOIN WN_PAGINAS p ON gp.PAGINA_ID = p.ID
+    WHERE u.ID = :userId
+      AND p.CODIGO = :pageCode
+      AND g.ACTIVO = 'S'
+      AND p.ACTIVO = 'S'
+      AND gp.${permissionColumn} = 'S'
+  `;
+
+    const result = await this.db.query<{ HAS_PERMISSION: number }>(query, {
+      userId,
+      pageCode,
+    });
+
+    return result[0]?.HAS_PERMISSION > 0;
+  }
+
+  /**
+   * Verificar si el usuario tiene permiso para una ruta específica
+   */
+  async userHasRoutePermission(
+    userId: number,
+    route: string,
+  ): Promise<boolean> {
+    const query = `
+    SELECT COUNT(*) as HAS_PERMISSION
+    FROM WN_APP_USERS u
+    INNER JOIN WN_GRUPOS g ON u.GRUPO_ID = g.ID
+    INNER JOIN WN_GRUPO_PAGINAS gp ON g.ID = gp.GRUPO_ID
+    INNER JOIN WN_PAGINAS p ON gp.PAGINA_ID = p.ID
+    WHERE u.ID = :userId
+      AND p.RUTA = :route
+      AND g.ACTIVO = 'S'
+      AND p.ACTIVO = 'S'
+      AND gp.PUEDE_VER = 'S'
+  `;
+
+    const result = await this.db.query<{ HAS_PERMISSION: number }>(query, {
+      userId,
+      route,
+    });
+
+    return result[0]?.HAS_PERMISSION > 0;
   }
 }

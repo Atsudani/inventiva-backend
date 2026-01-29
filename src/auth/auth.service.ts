@@ -21,41 +21,47 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { ForgotPasswordDto } from './dto/forgot-password.dto';
 import { ResetPasswordDto } from './dto/reset-password.dto';
 import { EmailService } from '../email/email.service';
+import {
+  type PermisosJerarquicos,
+  // PaginaIntermedia,
+  TipoIntermedio,
+  ModuloIntermedio,
+} from './types/permisos.types';
 
 // ✅ INTERFACES FUERA DE LA CLASE (al inicio del archivo)
 // ------------------------------------------------
 
-interface PaginaIntermedia {
-  id: number;
-  codigo: string;
-  nombre: string;
-  ruta: string;
-  icono: string | null;
-  orden: number;
-  permisos: {
-    ver: boolean;
-    crear: boolean;
-    editar: boolean;
-    eliminar: boolean;
-  };
-}
+// interface PaginaIntermedia {
+//   id: number;
+//   codigo: string;
+//   nombre: string;
+//   ruta: string;
+//   icono: string | null;
+//   orden: number;
+//   permisos: {
+//     ver: boolean;
+//     crear: boolean;
+//     editar: boolean;
+//     eliminar: boolean;
+//   };
+// }
 
-interface TipoIntermedio {
-  id: number;
-  codigo: string;
-  nombre: string;
-  orden: number;
-  paginas: PaginaIntermedia[];
-}
+// interface TipoIntermedio {
+//   id: number;
+//   codigo: string;
+//   nombre: string;
+//   orden: number;
+//   paginas: PaginaIntermedia[];
+// }
 
-interface ModuloIntermedio {
-  id: number;
-  codigo: string;
-  nombre: string;
-  icono: string;
-  orden: number;
-  tipos: Map<number, TipoIntermedio>;
-}
+// interface ModuloIntermedio {
+//   id: number;
+//   codigo: string;
+//   nombre: string;
+//   icono: string;
+//   orden: number;
+//   tipos: Map<number, TipoIntermedio>;
+// }
 
 @Injectable()
 export class AuthService {
@@ -777,7 +783,7 @@ export class AuthService {
    * Retorna la estructura jerárquica completa: módulos -> tipos -> páginas
    */
 
-  async getUserPermissions(userId: number) {
+  async getUserPermissions(userId: number): Promise<PermisosJerarquicos> {
     const query = `
     SELECT 
       m.ID as MODULO_ID,

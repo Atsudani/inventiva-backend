@@ -971,4 +971,77 @@ export class AuthService {
 
     return result[0]?.HAS_PERMISSION > 0;
   }
+
+  /**
+   * Obtener sectores del usuario en una empresa específica
+   */
+  async getSectoresByUsuarioEmpresa(codUsuario: string, codEmpresa: string) {
+    const query = `
+    SELECT 
+      s.cod_empresa,
+      s.cod_sector,
+      s.descripcion as sector_nombre,
+      s.abreviatura,
+      su.por_defecto,
+      suc.cod_sucursal,
+      suc.descripcion as sucursal_nombre,
+      suc.es_matriz
+    FROM sectores s
+    INNER JOIN sectores_usuario su 
+      ON s.cod_empresa = su.cod_empresa 
+      AND s.cod_sector = su.cod_sector
+    INNER JOIN sucursales suc 
+      ON s.cod_empresa = suc.cod_empresa
+      AND s.cod_sector = suc.cod_sector
+    WHERE su.cod_usuario = :codUsuario
+      AND s.cod_empresa = :codEmpresa
+    ORDER BY su.por_defecto DESC, s.descripcion
+  `;
+
+    const sectores = await this.db.query<{
+      COD_EMPRESA: string;
+      COD_SECTOR: string;
+      SECTOR_NOMBRE: string;
+      ABREVIATURA: string;
+      POR_DEFECTO: string;
+      COD_SUCURSAL: string;
+      SUCURSAL_NOMBRE: string;
+      ES_MATRIZ: string;
+    }>(query, { codUsuario, codEmpresa });
+
+    return sectores.map((s) => ({
+      codEmpresa: s.COD_EMPRESA,
+      codSector: s.COD_SECTOR,
+      nombre: s.SECTOR_NOMBRE,
+      abreviatura: s.ABREVIATURA,
+      porDefecto: s.POR_DEFECTO === 'S',
+      sucursal: {
+        codigo: s.COD_SUCURSAL,
+        nombre: s.SUCURSAL_NOMBRE,
+        esMatriz: s.ES_MATRIZ === 'S',
+      },
+    }));
+  }
+
+  /**
+   * Validar que el usuario tenga acceso a la empresa
+   */
+  async validarAccesoEmpresa(
+    codUsuario: string,
+    codEmpresa: string,
+  ): Promise<boolean> {
+    const query = `
+    SELECT COUNT(*) as tiene_acceso
+    FROM sectores_usuario su
+    WHERE su.cod_usuario = :codUsuario
+      AND su.cod_empresa = :codEmpresa
+  `;
+
+    const result = await this.db.query<{ TIENE_ACCESO: number }>(query, {
+      codUsuario,
+      codEmpresa,
+    });
+
+    return (result[0]?.TIENE_ACCESO ?? 0) > 0;
+  }
 }

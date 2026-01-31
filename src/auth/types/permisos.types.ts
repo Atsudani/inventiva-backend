@@ -54,6 +54,7 @@ export interface TipoIntermedio {
   id: number;
   codigo: string;
   nombre: string;
+  icono: string;
   orden: number;
   paginas: PaginaIntermedia[];
 }

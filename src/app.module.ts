@@ -9,6 +9,7 @@ import { EmailModule } from './email/email.module';
 import { ThrottlerGuard, ThrottlerModule } from '@nestjs/throttler';
 import { APP_GUARD } from '@nestjs/core';
 import { SifenModule } from './sifen/sifen.module';
+import { BasesModule } from './bases/bases.module';
 
 @Module({
   imports: [
@@ -24,6 +25,7 @@ import { SifenModule } from './sifen/sifen.module';
     AuthModule,
     EmailModule,
     SifenModule,
+    BasesModule,
   ],
   controllers: [AppController, HealthController],
   providers: [

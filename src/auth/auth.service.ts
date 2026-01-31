@@ -795,6 +795,7 @@ export class AuthService {
       t.ID as TIPO_ID,
       t.CODIGO as TIPO_CODIGO,
       t.NOMBRE as TIPO_NOMBRE,
+      t.ICONO as TIPO_ICONO,
       t.ORDEN as TIPO_ORDEN,
       
       p.ID as PAGINA_ID,
@@ -835,6 +836,7 @@ export class AuthService {
       TIPO_ID: number;
       TIPO_CODIGO: string;
       TIPO_NOMBRE: string;
+      TIPO_ICONO: string;
       TIPO_ORDEN: number;
       PAGINA_ID: number;
       PAGINA_CODIGO: string;
@@ -872,6 +874,7 @@ export class AuthService {
           id: row.TIPO_ID,
           codigo: row.TIPO_CODIGO,
           nombre: row.TIPO_NOMBRE,
+          icono: row.TIPO_ICONO,
           orden: row.TIPO_ORDEN,
           paginas: [],
         });
